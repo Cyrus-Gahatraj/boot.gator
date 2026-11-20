@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Cyrus-Gahatraj/gator/internal/config"
-	"github.com/Cyrus-Gahatraj/gator/internal/database"
+	"github.com/Cyrus-Gahatraj/boot.gator/internal/config"
+	"github.com/Cyrus-Gahatraj/boot.gator/internal/database"
 	_ "github.com/lib/pq"
 )
 

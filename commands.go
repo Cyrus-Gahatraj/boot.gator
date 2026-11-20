@@ -29,6 +29,7 @@ func newCommands() commands {
 	c.register("follow", middlewareLoggedIn(follow))
 	c.register("following", middlewareLoggedIn(following))
 	c.register("unfollow", middlewareLoggedIn(unfollow))
+	c.register("browse", middlewareLoggedIn(browse))
 
 	return c
 }

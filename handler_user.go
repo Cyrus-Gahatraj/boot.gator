@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Cyrus-Gahatraj/gator/internal/database"
+	"github.com/Cyrus-Gahatraj/boot.gator/internal/database"
 	"github.com/google/uuid"
 )
 

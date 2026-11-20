@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"html"
 	"io"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/Cyrus-Gahatraj/gator/internal/database"
+	"github.com/Cyrus-Gahatraj/boot.gator/internal/database"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type RSSFeed struct {
@@ -29,7 +34,6 @@ type RSSItem struct {
 	PubDate     string `xml:"pubDate"`
 }
 
-
 func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
 	return func(s *state, cmd command) error {
 		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
@@ -40,7 +44,6 @@ func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) 
 		return handler(s, cmd, user)
 	}
 }
-
 
 func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
@@ -94,10 +97,56 @@ func scrapeFeeds(s *state) error {
 	}
 
 	for _, item := range feedData.Channel.Item {
-		fmt.Printf("* %s\n", item.Title)
+		publishedAt, err := parsePublishedAt(item.PubDate)
+		if err != nil {
+			log.Printf("could not parse published date %q for post %q: %v; using current time", item.PubDate, item.Title, err)
+			publishedAt = time.Now()
+		}
+
+		now := time.Now()
+		params := database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			Title:       item.Title,
+			Url:         item.Link,
+			Description: sql.NullString{String: item.Description, Valid: item.Description != ""},
+			PublishedAt: publishedAt,
+			FeedID:      feed.ID,
+		}
+
+		if _, err := s.db.CreatePost(context.Background(), params); err != nil {
+			var pqErr *pq.Error
+			if errors.As(err, &pqErr) && pqErr.Code == pq.ErrorCode("23505") {
+				continue
+			}
+			log.Printf("could not save post %q: %v", item.Title, err)
+		}
 	}
 
 	return nil
+}
+
+// parsePublishedAt handles the date formats commonly found in RSS and Atom feeds.
+func parsePublishedAt(raw string) (time.Time, error) {
+	layouts := []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		time.RFC3339,
+		"Mon, 2 Jan 2006 15:04:05 -0700",
+		"Mon, 2 Jan 2006 15:04:05 MST",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	value := strings.TrimSpace(raw)
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported published date format: %q", raw)
 }
 
 func aggregator(s *state, cmd command) error {
@@ -236,7 +285,7 @@ func unfollow(s *state, cmd command, user database.User) error {
 		return fmt.Errorf("could not get feed: %w", err)
 	}
 
-	deleteParam := database.DeleteFeedFollowParams {
+	deleteParam := database.DeleteFeedFollowParams{
 		UserID: user.ID,
 		FeedID: feed.ID,
 	}
