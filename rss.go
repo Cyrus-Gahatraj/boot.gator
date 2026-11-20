@@ -77,19 +77,47 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	return &rssFeed, nil
 }
 
-func aggregator(s *state, cmd command) error {
-	if len(cmd.args) != 0 {
-		return fmt.Errorf("agg need no arguments")
-	}
-
-	rssFeed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+func scrapeFeeds(s *state) error {
+	feed, err := s.db.GetNextFeedToFetch(context.Background())
 	if err != nil {
-		return fmt.Errorf("error:%v\n", err)
+		return fmt.Errorf("could not get next feed: %w", err)
 	}
 
-	fmt.Printf("%+v\n", rssFeed)
+	err = s.db.MarkFeedFetched(context.Background(), feed.ID)
+	if err != nil {
+		return fmt.Errorf("could not mark feed as fetched: %w", err)
+	}
+
+	feedData, err := fetchFeed(context.Background(), feed.Url)
+	if err != nil {
+		return fmt.Errorf("could not fetch feed %s: %w", feed.Name, err)
+	}
+
+	for _, item := range feedData.Channel.Item {
+		fmt.Printf("* %s\n", item.Title)
+	}
 
 	return nil
+}
+
+func aggregator(s *state, cmd command) error {
+	if len(cmd.args) != 1 {
+		return fmt.Errorf("usage: %s <time_between_reqs>", cmd.name)
+	}
+
+	timeBetweenReqs, err := time.ParseDuration(cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("invalid duration: %w", err)
+	}
+
+	fmt.Printf("Collecting feeds every %s\n", cmd.args[0])
+
+	ticker := time.NewTicker(timeBetweenReqs)
+	for ; ; <-ticker.C {
+		if err := scrapeFeeds(s); err != nil {
+			fmt.Printf("error: %v\n", err)
+		}
+	}
 }
 
 func addFeed(s *state, cmd command, user database.User) error {
